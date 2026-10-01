@@ -43,6 +43,7 @@ typedef struct {
             union {
                 reg16 AF;
                 struct {
+                    reg8 A; // Accumulator
                     union {
                         reg8 F; // Flags
                         struct {
@@ -53,28 +54,27 @@ typedef struct {
                             byte z:1; // Zero
                         };
                     };
-                    reg8 A; // Accumulator
                 };
             };
             union {
                 reg16 BC;
                 struct {
-                    reg8 C;
                     reg8 B;
+                    reg8 C;
                 };
             };
             union {
                 reg16 DE;
                 struct {
-                    reg8 E;
                     reg8 D;
+                    reg8 E;
                 };
             };
             union {
                 reg16 HL;
                 struct {
-                    reg8 L;
                     reg8 H;
+                    reg8 L;
                 };
             };
             reg16 SP; // Stack pointer
@@ -134,7 +134,7 @@ typedef struct {
                 };
             };
             byte NR[23];
-            byte _unused_0xFF27_0xFF2F[9];
+            byte _unused_0xFF27_0xFF2F;
             byte WAV[16];
             union {
                 byte LCDC;
@@ -161,8 +161,8 @@ typedef struct {
                     byte LCD_MODE:2;
                 };
             };
-            byte SCY;
             byte SCX;
+            byte SCY;
             byte LY;
             byte LYC;
             byte DMA;
@@ -226,14 +226,11 @@ typedef struct {
     byte wram[WRAM]; // work RAM
     hw_registers hw_regs;
     color_pixel screen[SCREEN_HEIGHT][SCREEN_WIDTH];
-    cartridge *cart;
+    cartridge cart;
     byte boot_rom[BOOT_ROM_SIZE];
 } motherboard;
 
-byte read_address(motherboard const *mb, a16_t address);
-void write_address(motherboard *mb, a16_t address, byte data);
-
-//byte *map_address(motherboard *mb, a16_t address, io_operation mode);
+byte *map_address(motherboard *mb, a16_t address, io_operation mode);
 void load_next_instruction(motherboard *mb);
 
 #endif

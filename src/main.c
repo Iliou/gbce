@@ -1,82 +1,99 @@
-#include <unistd.h>
-#include <fcntl.h>
-#include <stdio.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <fcntl.h>
+#include <string.h>
+#include <unistd.h>
 
+#include "tools.h"
 #include "cpu.h"
+#include "cartridge.h"
+#include "ins.h"
 
-[[unsequenced]] uint16_t bytes_to_16bits_int(const byte arr[2])
+static void dump_regs(registers const *regs)
 {
-    return ((uint16_t) arr[1] << 8) | arr[0];
+    fprintf(stderr,
+            "A = %02x   F = %02x\n"
+            "B = %02x   C = %02x\n"
+            "D = %02x   E = %02x\n"
+            "H = %02x   L = %02x\n"
+            "SP = %04x  PC = %04x\n\n",
+            regs->A, regs->F,
+            regs->B, regs->C,
+            regs->D, regs->E,
+            regs->H, regs->L,
+            regs->SP, regs->PC);
 }
 
-static int load_cart(char const *rom_path, byte **mem)
+/*
+int checksum(byte const *hdr)
 {
-    int fd = open(rom_path, O_RDONLY);
-    int rd_cnt = 0x150;
+    uint8_t checksum = 0;
+
+    for (uint16_t address = 0x0134; address <= 0x014C; address++) {
+        checksum = checksum - hdr[address] - 1;
+    }
+    fprintf(stderr, "Checksum: %.2X (Expected: %.2X)\n", checksum, hdr[0x14D]);
+    return checksum == hdr[0x14D];
+}
+*/
+
+void execute(motherboard *mb)
+{
+    while (mb->cpu.regs.PC != 0x00FE) {
+        //dump_regs(&mb->cpu.regs);
+        load_next_instruction(mb);
+        INSTRUCTIONS_PTR[mb->cpu.regs.IR](mb->cpu.regs.IR, mb, &mb->cpu.regs);
+        fprintf(stderr, "\n");
+    }
+}
+
+static int load_boot_rom(byte * restrict memory, char const * restrict boot_rom_path)
+{
+    int fd = open(boot_rom_path, O_RDONLY);
     ssize_t n;
 
-    if (fd == -1)
-        return 1;
-    *mem = malloc(rd_cnt);
-    n = read(fd, *mem, rd_cnt);
-    if (n != rd_cnt) {
-        printf("Read %ld bytes insted of %d\n", n, rd_cnt);
+    if (fd == -1) {
+        perror("open");
         return 1;
     }
+    n = read(fd, memory, BOOT_ROM_SIZE);
+    if (n != BOOT_ROM_SIZE) {
+        fprintf(stderr, "Boot ROM corrupted: expected %u bytes, read %ld", BOOT_ROM_SIZE, n);
+        close(fd);
+        return 1;
+    }
+    close(fd);
     return 0;
 }
 
-static void dump_section(byte const *cartridge, char const *sec_name, int start, int length)
+static void init_registers(registers *regs)
 {
-    printf("%s:", sec_name);
-    for (int i = 0; i < length; ++i) {
-        if (i % 8 == 0)
-            printf("\n");
-        else
-            printf(" - ");
-        printf("%.2X", cartridge[i + start]);
-    }
-    printf("\n\n");
-}
-
-static void dump_text(byte const *rom, char const *sec_name, int start, int sec_length)
-{
-    printf("%s:\n"
-           "%.*s\n\n", sec_name, sec_length, rom + start);
-}
-
-static void dump_rom_header(byte const *rom)
-{
-    uint16_t jmp_addr = bytes_to_16bits_int(rom + 0x102);
-
-    dump_section(rom, "Start", 0, 0x100);
-    dump_section(rom, "Entry point", 0x100, 4);
-    dump_section(rom, "Nintendo logo", 0x104, 48);
-    dump_text(rom, "Title", 0x134, 16);
-    dump_section(rom, "SGB flag", 0x146, 1);
-    dump_section(rom, "Cartridge type", 0x147, 1);
-    dump_section(rom, "ROM size", 0x148, 1);
-    dump_section(rom, "RAM size", 0x149, 1);
-    uint8_t checksum = 0;
-    for (uint16_t address = 0x0134; address <= 0x014C; address++) {
-        checksum = checksum - rom[address] - 1;
-    }
-    printf("Checksum: %.2X - %.2X\n", checksum, rom[0x14D]);
-    printf("jump addres: %#.4X (%d)\n", jmp_addr, jmp_addr);
+    regs->AF = 0x1180;
+    regs->DE = 0xFF56;
+    regs->HL = 0x000D;
 }
 
 int main(int ac, char **av)
 {
-    byte *cartridge = NULL;
+    motherboard mb = {0};
+    cartridge cart;
 
-    if (ac != 2) {
-        printf("No cartridge\n");
+    if (ac < 2) {
+        fprintf(stderr, "Error: No cartridge\n");
         return 1;
     }
-    if (load_cart(av[1], &cartridge))
+    init_registers(&mb.cpu.regs);
+    if (load_boot_rom(mb.boot_rom, "cgb.bin") != 0)
         return 1;
-    dump_rom_header(cartridge);
-    free(cartridge);
+    if (create_cartridge(av[1], &cart) != 0)
+        return 1;
+    // DEBUG
+    printf("--- DUMP ROM ---\n");
+    dump_rom_header(&cart.header);
+    printf("--- END OF DUMP ROM ---\n");
+    mb.cart = &cart;
+    //memcpy(mb.wram + 0x100, cart.raw_hdr, sizeof(cart.raw_hdr));
+    execute(&mb);
+    free(cart.rom);
     return 0;
 }
